@@ -1,0 +1,15 @@
+[project]
+name = "feishu-doc-detect"
+version = "0.1.0"
+description = "把 Markdown 标题的最高级别调整为指定数字，其余标题等距平移（忽略代码块等非标题的 #）"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.scripts]
+feishu-doc-detect = "feishu_doc_detect.cli:main"
+fsdd = "feishu_doc_detect.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
