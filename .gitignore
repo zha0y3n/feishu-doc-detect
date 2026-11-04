@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+
+# Backups created by fsdd -o
+*.bak
