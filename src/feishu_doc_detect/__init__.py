@@ -1,4 +1,4 @@
-"""调整 Markdown 标题的最高级别。"""
+"""整理 Markdown 空行并复制到剪切板，可选调整标题级别。"""
 from .cli import shift_headings, main
 
 __all__ = ["shift_headings", "main"]

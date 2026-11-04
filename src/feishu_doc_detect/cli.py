@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-把 Markdown 文件中标题的最高级别调整为指定数字，其余标题等距平移。
+整理 Markdown 文件的空行，并把结果复制到剪切板；可选调整标题级别。
 
-例: 原文有 1/2/3/4 级标题，指定 2 → 变为 2/3/4/5 级。
+整理空行（默认开启，--no-break-lines 关闭）：
+  - 单独 1 个空行 → 删除
+  - 连续 3 个空行 → 变为 1 个空行
+  - 出现其它数量的连续空行 → 报告行号并终止，不复制也不写文件
+  - 不检查代码块、front matter、HTML 注释内部
 
+调整标题（指定 level 时）：最高级标题变为 level，其余标题等距平移。
 只识别真正的 ATX 标题（行首 0~3 个空格 + 1~6 个 # + 空格或行尾），
 会跳过以下内容中的 #：
   - ``` / ~~~ 围栏代码块（含代码里的 # 注释）
@@ -13,17 +18,15 @@
   - 行内的 #（如 #tag、C#、`#include`）
   - 转义的 \\#
 
-可选 -b：整理空行（不检查代码块、front matter、HTML 注释内部）
-  - 单独 1 个空行 → 删除
-  - 连续 3 个空行 → 变为 1 个空行
-  - 出现其它数量的连续空行 → 报告行号并终止，不修改任何文件
-
 用法:
-  fsdd input.md 2              # 直接修改原文件，并生成 input.md.bak 备份
-  fsdd input.md 2 -o out.md    # 写到新文件，原文件不动
-  fsdd input.md 2 -b           # 同时整理空行
+  fsdd input.md                # 整理空行，只复制到剪切板，不写任何文件
+  fsdd input.md 2              # 同时把最高级标题调整为 2 级
+  fsdd input.md 2 -o out.md    # 另外写到 out.md，原文件不动
+  fsdd input.md 2 -o           # 覆盖原文件，并备份原文件
+  fsdd input.md --no-break-lines
 """
 import argparse
+import os
 import re
 import shutil
 import sys
@@ -139,67 +142,87 @@ def main():
         except (AttributeError, ValueError):
             pass
 
-    p = argparse.ArgumentParser(prog='feishu-doc-detect', description='调整 Markdown 标题的最高级别')
-    p.add_argument('input', help='输入的 Markdown 文件')
-    p.add_argument('level', type=int, help='目标最高级别 (1-6)')
-    p.add_argument('-o', '--output', help='写到新文件（默认直接修改原文件并保留 .bak 备份）')
-    p.add_argument('-b', '--blank-lines', action='store_true',
-                   help='整理空行：单独 1 个空行删除，连续 3 个空行变为 1 个；'
-                        '出现其它数量时报告行号并终止（不检查代码块内部）')
-    p.add_argument('--no-copy', action='store_true', help='不把转换后的内容复制到剪切板')
-    p.add_argument('--encoding', default='utf-8', help='文件编码，默认 utf-8')
-    args = p.parse_args()
+    p = argparse.ArgumentParser(prog='feishu-doc-detect',
+                                description='整理 Markdown 空行并复制到剪切板，可选调整标题级别')
+    p.add_argument('input', help='输入的 Markdown 文件（UTF-8）')
+    p.add_argument('level', type=int, nargs='?',
+                   help='目标最高标题级别 (1-6)，留空则不修改标题')
+    p.add_argument('-o', '--output', nargs='?', const='', metavar='FILE',
+                   help='写到文件；FILE 留空则覆盖原文件并生成 .bak 备份（默认只复制到剪切板，不写文件）')
+    p.add_argument('--no-break-lines', action='store_true',
+                   help='不整理空行（默认：单独 1 个空行删除，连续 3 个空行变为 1 个，'
+                        '其它数量报告行号并终止；不检查代码块内部）')
+    args = p.parse_intermixed_args()
 
-    if not 1 <= args.level <= 6:
+    if args.level is not None and not 1 <= args.level <= 6:
         p.error('level 必须在 1~6 之间')
 
-    with open(args.input, encoding=args.encoding, newline='') as f:
-        lines = f.read().splitlines(keepends=True)
+    try:
+        # utf-8-sig: 兼容 Windows 上带 BOM 的 UTF-8 文件，否则首行标题会识别不出来
+        with open(args.input, encoding='utf-8-sig', newline='') as f:
+            lines = f.read().splitlines(keepends=True)
+    except OSError as e:
+        print(f'错误: 无法读取 {args.input}: {e.strerror}', file=sys.stderr)
+        sys.exit(1)
+    except UnicodeDecodeError:
+        print(f'错误: {args.input} 不是 UTF-8 编码，请先转换为 UTF-8', file=sys.stderr)
+        sys.exit(1)
 
     headings, protected = scan(lines)
 
     runs = []
-    if args.blank_lines:
+    if not args.no_break_lines:
         runs = blank_runs(lines, protected)
         bad = [(s, c) for s, c in runs if c not in (1, 3)]
         if bad:
-            print(f'错误: 发现 {len(bad)} 处连续空行数量不是 1 或 3，未修改任何文件：', file=sys.stderr)
+            print(f'错误: 发现 {len(bad)} 处连续空行数量不是 1 或 3，未复制也未写入任何内容：',
+                  file=sys.stderr)
             for s, c in bad:
                 where = f'第 {s + 1} 行' if c == 1 else f'第 {s + 1}-{s + c} 行'
                 print(f'  {where}: 连续 {c} 个空行', file=sys.stderr)
+            print('修正后重试，或加 --no-break-lines 跳过空行整理', file=sys.stderr)
             sys.exit(1)
 
-    offset, clamped = shift_headings(lines, headings, args.level)
-    for line_no, old, new in clamped:
-        print(f'警告: 第 {line_no} 行 {old} 级标题需变为 {new} 级，超过 6 级上限，已设为 6 级',
-              file=sys.stderr)
+    parts = []
+    if args.level is not None:
+        offset, clamped = shift_headings(lines, headings, args.level)
+        for line_no, old, new in clamped:
+            print(f'警告: 第 {line_no} 行 {old} 级标题需变为 {new} 级，超过 6 级上限，已设为 6 级',
+                  file=sys.stderr)
+        parts.append(f'标题级别偏移 {offset:+d}')
 
-    if args.blank_lines:
+    if not args.no_break_lines:
         lines = squeeze_blank_lines(lines, runs)
+        parts.append(f'删除 {sum(1 for _, c in runs if c == 1)} 处单独空行，'
+                     f'合并 {sum(1 for _, c in runs if c == 3)} 处三连空行')
 
-    if args.output:
-        out_path = args.output
-    else:
-        shutil.copyfile(args.input, args.input + '.bak')
-        out_path = args.input
+    if parts:
+        print('完成: ' + '，'.join(parts), file=sys.stderr)
 
     result = ''.join(lines)
-    with open(out_path, 'w', encoding=args.encoding, newline='') as f:
-        f.write(result)
-    msg = f'完成: 标题级别偏移 {offset:+d}，已写入 {out_path}'
-    if args.blank_lines:
-        msg += f'，删除 {sum(1 for _, c in runs if c == 1)} 处单独空行，' \
-               f'合并 {sum(1 for _, c in runs if c == 3)} 处三连空行'
-    if not args.output:
-        msg += f'（备份: {args.input}.bak）'
-    print(msg, file=sys.stderr)
 
-    if not args.no_copy:
-        try:
-            clipboard.copy(result)
-            print('已复制转换后的内容到剪切板', file=sys.stderr)
-        except clipboard.ClipboardError as e:
-            print(f'警告: 复制到剪切板失败（文件已正常写入）: {e}', file=sys.stderr)
+    if args.output is not None:
+        out_path = args.output or args.input
+        msg = f'已写入 {out_path}'
+        # 只有覆盖原文件时才备份
+        if os.path.exists(out_path) and os.path.samefile(out_path, args.input):
+            bak = args.input + '.bak'
+            shutil.copyfile(args.input, bak)
+            msg += f'（备份: {bak}）'
+        with open(out_path, 'w', encoding='utf-8', newline='') as f:
+            f.write(result)
+        print(msg, file=sys.stderr)
+
+    try:
+        clipboard.copy(result)
+        print('已复制到剪切板', file=sys.stderr)
+    except clipboard.ClipboardError as e:
+        if args.output is None:
+            # 剪切板是唯一的输出，失败就等于什么都没得到
+            print(f'错误: 复制到剪切板失败: {e}', file=sys.stderr)
+            print('可加 -o FILE 把结果写到文件', file=sys.stderr)
+            sys.exit(1)
+        print(f'警告: 复制到剪切板失败（文件已正常写入）: {e}', file=sys.stderr)
 
 
 if __name__ == '__main__':

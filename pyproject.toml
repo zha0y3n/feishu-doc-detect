@@ -1,7 +1,7 @@
 [project]
 name = "feishu-doc-detect"
 version = "0.1.0"
-description = "把 Markdown 标题的最高级别调整为指定数字，其余标题等距平移（忽略代码块等非标题的 #）"
+description = "整理 Markdown 空行并复制到剪切板，可选调整标题级别"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = []
